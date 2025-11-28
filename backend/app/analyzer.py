@@ -1,19 +1,19 @@
+import asyncio
 import io
 import json
 import os
-from typing import Any, Dict
+from typing import Any, Dict, List
 
+import google.generativeai as genai
 import pdfplumber
 import pytesseract
 from pdf2image import convert_from_bytes
-import google.generativeai as genai
 
 
 def _safe_json_parse(text: str) -> Dict[str, Any]:
     try:
         return json.loads(text)
     except Exception:
-        # Attempt to extract JSON between markers
         start = text.find("{")
         end = text.rfind("}")
         if start != -1 and end != -1 and end > start:
@@ -25,26 +25,27 @@ def _safe_json_parse(text: str) -> Dict[str, Any]:
 
 
 async def extract_text_from_pdf_bytes(file_bytes: bytes) -> str:
-    text_chunks: list[str] = []
-    # 1) Try text extraction via pdfplumber
+    return await asyncio.to_thread(_extract_text_sync, file_bytes)
+
+
+def _extract_text_sync(file_bytes: bytes) -> str:
+    text_chunks: List[str] = []
     try:
         with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
             for page in pdf.pages:
-                page_text = page.extract_text() or ""
-                if page_text.strip():
-                    text_chunks.append(page_text)
+                text = page.extract_text() or ""
+                if text.strip():
+                    text_chunks.append(text)
     except Exception:
-        # ignore and fallback to OCR
         pass
 
     extracted_text = "\n".join(text_chunks).strip()
     if extracted_text:
         return extracted_text
 
-    # 2) Fallback to OCR (pytesseract over images)
     try:
         images = convert_from_bytes(file_bytes)
-        ocr_chunks: list[str] = []
+        ocr_chunks: List[str] = []
         for image in images:
             text = pytesseract.image_to_string(image)
             if text and text.strip():
@@ -57,7 +58,6 @@ async def extract_text_from_pdf_bytes(file_bytes: bytes) -> str:
 async def analyze_with_gemini(resume_text: str, job_desc: str) -> Dict[str, Any]:
     api_key = os.getenv("GOOGLE_API_KEY", "")
     if not api_key:
-        # Fallback to deterministic local analysis when key is missing
         return _local_baseline_analysis(resume_text, job_desc)
 
     genai.configure(api_key=api_key)
@@ -69,25 +69,28 @@ async def analyze_with_gemini(resume_text: str, job_desc: str) -> Dict[str, Any]
         "suggestions (array of strings), analysis (string). Do not include any extra commentary."
     )
 
-    user_payload = {
-        "resume": resume_text[:120000],
-        "job_description": job_desc[:60000],
-    }
-
     prompt = (
-        f"{system_prompt}\n\nInput JSON:\n" + json.dumps(user_payload, ensure_ascii=False)
+        f"{system_prompt}\n\nInput JSON:\n"
+        + json.dumps(
+            {
+                "resume": resume_text[:120000],
+                "job_description": job_desc[:60000],
+            },
+            ensure_ascii=False,
+        )
         + "\n\nRespond with only the JSON object."
     )
 
-    response = await model.generate_content_async(prompt)
-    text = (response.text or "").strip()
+    try:
+        response = await model.generate_content_async(prompt)
+        text = (response.text or "").strip()
+        data = _safe_json_parse(text)
+    except Exception:
+        data = {}
 
-    data = _safe_json_parse(text)
     if not data:
-        # minimal safe structure
         data = _local_baseline_analysis(resume_text, job_desc)
 
-    # Normalize fields
     return {
         "match_score": int(data.get("match_score", 0)),
         "missing_keywords": list(data.get("missing_keywords", [])),
@@ -97,19 +100,14 @@ async def analyze_with_gemini(resume_text: str, job_desc: str) -> Dict[str, Any]
 
 
 def _local_baseline_analysis(resume_text: str, job_desc: str) -> Dict[str, Any]:
-    # Very naive baseline when API is not set; keeps the app functional
-    def tokenize(s: str) -> list[str]:
-        import re
+    import re
 
-        return [
-            t
-            for t in re.sub(r"[^a-z0-9\s+#.]", " ", s.lower()).split()
-            if t
-        ]
+    def tokenize(s: str) -> List[str]:
+        return [t for t in re.sub(r"[^a-z0-9\s+#.]", " ", s.lower()).split() if t]
 
-    def unique(tokens: list[str]) -> list[str]:
+    def unique(tokens: List[str]) -> List[str]:
         seen: set[str] = set()
-        out: list[str] = []
+        out: List[str] = []
         for t in tokens:
             if t not in seen:
                 seen.add(t)
@@ -123,7 +121,7 @@ def _local_baseline_analysis(resume_text: str, job_desc: str) -> Dict[str, Any]:
     score = 0 if not job_tokens else round(len(overlap) * 100 / len(job_tokens))
 
     suggestions = [
-        f"Consider adding concrete examples for '{kw}' if applicable."
+        f"Include concrete examples for '{kw}' if relevant."
         for kw in missing[:10]
     ]
 
@@ -133,5 +131,4 @@ def _local_baseline_analysis(resume_text: str, job_desc: str) -> Dict[str, Any]:
         "suggestions": suggestions,
         "analysis": f"Approximate match based on keyword overlap: {score}%.",
     }
-
 

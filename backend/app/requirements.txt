@@ -1,9 +1,10 @@
 fastapi
 uvicorn[standard]
-python-dotenv
-google-generativeai
-pytesseract
+python-multipart
 pdfplumber
 pdf2image
-python-multipart
+pytesseract
+python-dotenv
+google-generativeai
+google-generativeai
 

@@ -1,11 +1,11 @@
 import os
-from fastapi import FastAPI, File, Form, UploadFile, HTTPException
+
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 
-from analyzer import extract_text_from_pdf_bytes, analyze_with_gemini
-
+from analyzer import analyze_with_gemini, extract_text_from_pdf_bytes
 
 load_dotenv()
 
@@ -28,34 +28,57 @@ async def analyze_resume(
     resumeText: str | None = Form(default=None),
     jobDesc: str | None = Form(default=None),
 ):
-    try:
-        if not resumeFile and not resumeText:
-            raise HTTPException(status_code=400, detail="Provide resumeFile or resumeText")
+    """
+    Accepts a PDF or raw resume text with an optional job description and
+    returns AI-driven analysis results.
+    """
 
-        extracted_text: str = ""
-        if resumeFile is not None:
-            file_bytes = await resumeFile.read()
-            extracted_text = await extract_text_from_pdf_bytes(file_bytes)
+    if not resumeFile and not resumeText:
+        raise HTTPException(status_code=400, detail="Provide resumeFile or resumeText.")
 
-        resume_text_final = (resumeText or "").strip()
-        if extracted_text:
-            resume_text_final = extracted_text
+    extracted_text: str = ""
+    if resumeFile is not None:
+        if resumeFile.content_type not in (
+            "application/pdf",
+            "application/octet-stream",
+        ):
+            raise HTTPException(status_code=400, detail="Only PDF files are supported.")
+        file_bytes = await resumeFile.read()
+        if not file_bytes:
+            raise HTTPException(status_code=400, detail="Empty file received.")
+        extracted_text = await extract_text_from_pdf_bytes(file_bytes)
 
-        if not resume_text_final:
-            raise HTTPException(status_code=400, detail="Could not extract resume text")
+    resume_text_final = (resumeText or "").strip()
+    if extracted_text:
+        resume_text_final = extracted_text
 
-        job_desc_final = (jobDesc or "").strip()
+    if not resume_text_final:
+        raise HTTPException(
+            status_code=400, detail="Could not extract resume text. Try another file."
+        )
 
-        result = await analyze_with_gemini(resume_text_final, job_desc_final)
-        return JSONResponse(content=result)
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    job_desc_final = (jobDesc or "").strip()
+
+    result = await analyze_with_gemini(resume_text_final, job_desc_final)
+    return JSONResponse(content=result)
+
+
+@app.post("/extract")
+async def extract_resume_text(resumeFile: UploadFile = File(...)):
+    if resumeFile.content_type not in ("application/pdf", "application/octet-stream"):
+        raise HTTPException(status_code=400, detail="Only PDF files are supported.")
+    file_bytes = await resumeFile.read()
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="Empty file received.")
+    extracted_text = await extract_text_from_pdf_bytes(file_bytes)
+    if not extracted_text:
+        raise HTTPException(
+            status_code=422, detail="Could not extract text from the provided PDF."
+        )
+    return JSONResponse({"text": extracted_text})
 
 
 @app.get("/health")
 async def health():
     return {"status": "ok"}
-
 
