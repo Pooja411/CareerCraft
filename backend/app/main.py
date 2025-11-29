@@ -4,6 +4,8 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
+from scrapper import scrape_google_jobs
+
 
 from analyzer import analyze_with_gemini, extract_text_from_pdf_bytes
 
@@ -82,3 +84,7 @@ async def extract_resume_text(resumeFile: UploadFile = File(...)):
 async def health():
     return {"status": "ok"}
 
+@app.get("/companies/google/hiring")
+async def google_hiring(query: str = "software engineer"):
+    jobs = scrape_google_jobs(query)
+    return {"total": len(jobs), "roles": jobs}

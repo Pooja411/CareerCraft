@@ -56,12 +56,12 @@ def _extract_text_sync(file_bytes: bytes) -> str:
 
 
 async def analyze_with_gemini(resume_text: str, job_desc: str) -> Dict[str, Any]:
-    api_key = os.getenv("GOOGLE_API_KEY", "")
+    api_key = os.getenv("GOOGLE_API_KEY")
     if not api_key:
         return _local_baseline_analysis(resume_text, job_desc)
 
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    model = genai.GenerativeModel("gemini-2.5-flash")
 
     system_prompt = (
         "You are a resume analysis assistant. Given a resume and an optional job description, "
@@ -81,12 +81,21 @@ async def analyze_with_gemini(resume_text: str, job_desc: str) -> Dict[str, Any]
         + "\n\nRespond with only the JSON object."
     )
 
+    response = await model.generate_content_async(
+        prompt,
+        generation_config=genai.GenerationConfig(
+            response_mime_type="application/json"
+        )
+    )
+
+    text = response.text or ""
+    # print("GEMINI RAW OUTPUT:", text)
+
     try:
-        response = await model.generate_content_async(prompt)
-        text = (response.text or "").strip()
-        data = _safe_json_parse(text)
-    except Exception:
+        data = json.loads(text)
+    except:
         data = {}
+
 
     if not data:
         data = _local_baseline_analysis(resume_text, job_desc)
