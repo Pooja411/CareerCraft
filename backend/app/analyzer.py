@@ -108,6 +108,100 @@ async def analyze_with_gemini(resume_text: str, job_desc: str) -> Dict[str, Any]
     }
 
 
+async def generate_roadmap_with_gemini(resume_text: str, job_desc: str) -> Dict[str, Any]:
+    """
+    Use Gemini to generate a learning roadmap focused on the skill gap between
+    the job description and the resume.
+    """
+    api_key = os.getenv("GOOGLE_API_KEY")
+    if not api_key:
+        # Fallback: reuse local baseline to compute missing keywords
+        baseline = _local_baseline_analysis(resume_text, job_desc)
+        gaps = baseline.get("missing_keywords", [])
+        return {
+            "skill_gaps": gaps,
+            "roadmap": [
+                {
+                    "title": "Close your skill gaps",
+                    "duration": "8-12 weeks",
+                    "description": "Focus on the key topics missing from your resume compared to the job description.",
+                    "skills": gaps,
+                    "resources": [
+                        "Official docs for each missing technology",
+                        "YouTube crash courses",
+                        "Hands-on mini projects using those skills",
+                    ],
+                }
+            ],
+        }
+
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel("gemini-2.5-flash")
+
+    system_prompt = (
+        "You are a career mentor. Given a resume and a target job description, "
+        "identify the skill gap and generate a concise learning roadmap.\n"
+        "Return ONLY a STRICT JSON object with keys:\n"
+        "  skill_gaps: array of short strings (skills/technologies/topics missing in resume but present in job description),\n"
+        '  roadmap: array of objects with keys {title, duration, description, skills, resources} where:\n'
+        "    - title: string (phase name),\n"
+        "    - duration: string like '2-3 weeks',\n"
+        "    - description: short paragraph,\n"
+        "    - skills: array of strings (focus skills for this phase),\n"
+        "    - resources: array of strings (generic resource suggestions, no URLs required).\n"
+        "Do not include any explanatory text outside the JSON."
+    )
+
+    prompt = (
+        f"{system_prompt}\n\nInput JSON:\n"
+        + json.dumps(
+            {
+                "resume": resume_text[:120000],
+                "job_description": job_desc[:60000],
+            },
+            ensure_ascii=False,
+        )
+        + "\n\nRespond with only the JSON object."
+    )
+
+    response = await model.generate_content_async(
+        prompt,
+        generation_config=genai.GenerationConfig(response_mime_type="application/json"),
+    )
+
+    text = response.text or ""
+
+    try:
+        data = json.loads(text)
+    except Exception:
+        data = {}
+
+    if not data:
+        baseline = _local_baseline_analysis(resume_text, job_desc)
+        gaps = baseline.get("missing_keywords", [])
+        data = {
+            "skill_gaps": gaps,
+            "roadmap": [
+                {
+                    "title": "Close your skill gaps",
+                    "duration": "8-12 weeks",
+                    "description": "Focus on the key topics missing from your resume compared to the job description.",
+                    "skills": gaps,
+                    "resources": [
+                        "Official docs for each missing technology",
+                        "YouTube crash courses",
+                        "Hands-on mini projects using those skills",
+                    ],
+                }
+            ],
+        }
+
+    return {
+        "skill_gaps": list(data.get("skill_gaps", [])),
+        "roadmap": list(data.get("roadmap", [])),
+    }
+
+
 def _local_baseline_analysis(resume_text: str, job_desc: str) -> Dict[str, Any]:
     import re
 

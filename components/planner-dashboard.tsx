@@ -1370,6 +1370,35 @@ function DailyGoals() {
 export default function PlannerDashboard() {
   useEffect(() => {
     requestNotificationPermission()
+    const tasks = loadTasks()
+    const today = new Date()
+    const overdue = tasks.filter((t) => t.deadline && new Date(t.deadline) < today && !t.completed)
+    const dueToday = tasks.filter(
+      (t) => t.deadline && isSameDay(new Date(t.deadline), today) && !t.completed && new Date(t.deadline) >= today,
+    )
+
+    if (overdue.length || dueToday.length) {
+      const parts: string[] = []
+      if (overdue.length) parts.push(`${overdue.length} overdue task${overdue.length > 1 ? "s" : ""}`)
+      if (dueToday.length) parts.push(`${dueToday.length} task${dueToday.length > 1 ? "s" : ""} due today`)
+
+      const message = parts.join(" • ")
+
+      toast.info("Planner summary", {
+        description: message,
+      })
+
+      if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "granted") {
+        try {
+          new Notification("CareerCraft Planner", {
+            body: message,
+            icon: "/placeholder-logo.svg",
+          })
+        } catch {
+          // ignore notification errors
+        }
+      }
+    }
   }, [])
 
   return (

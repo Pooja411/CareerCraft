@@ -4,7 +4,10 @@ import { useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { CheckCircle2, Circle } from "lucide-react"
+import { CheckCircle2, Circle, Loader2 } from "lucide-react"
+import { Textarea } from "@/components/ui/textarea"
+import { Input } from "@/components/ui/input"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 
 interface Milestone {
   id: string
@@ -307,8 +310,25 @@ const roadmaps: Roadmap[] = [
 ]
 
 export default function RoleRoadmaps() {
+  const [mode, setMode] = useState<"preset" | "ai">("preset")
   const [selectedRoadmap, setSelectedRoadmap] = useState<string | null>(null)
   const [completedMilestones, setCompletedMilestones] = useState<Set<string>>(new Set())
+
+  const [aiJobDesc, setAiJobDesc] = useState("")
+  const [aiResumeText, setAiResumeText] = useState("")
+  const [aiResumeFile, setAiResumeFile] = useState<File | null>(null)
+  const [aiBusy, setAiBusy] = useState(false)
+  const [aiError, setAiError] = useState<string | null>(null)
+  const [aiResult, setAiResult] = useState<{
+    skill_gaps: string[]
+    roadmap: {
+      title: string
+      duration: string
+      description: string
+      skills?: string[]
+      resources?: string[]
+    }[]
+  } | null>(null)
 
   const toggleMilestone = (milestoneId: string) => {
     const newCompleted = new Set(completedMilestones)
@@ -322,14 +342,178 @@ export default function RoleRoadmaps() {
 
   const currentRoadmap = roadmaps.find((r) => r.id === selectedRoadmap)
 
+  const handleGenerateAiRoadmap = async () => {
+    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8000"
+    if (!aiResumeFile && !aiResumeText.trim()) {
+      setAiError("Upload a resume PDF or paste resume text.")
+      return
+    }
+    if (!aiJobDesc.trim()) {
+      setAiError("Paste the job description to generate a roadmap.")
+      return
+    }
+    setAiBusy(true)
+    setAiError(null)
+    setAiResult(null)
+
+    try {
+      const form = new FormData()
+      if (aiResumeFile) form.append("resumeFile", aiResumeFile)
+      if (aiResumeText.trim()) form.append("resumeText", aiResumeText)
+      form.append("jobDesc", aiJobDesc)
+
+      const resp = await fetch(`${backendUrl}/roadmap`, {
+        method: "POST",
+        body: form,
+      })
+      if (!resp.ok) {
+        const txt = await resp.text()
+        throw new Error(txt || `Request failed: ${resp.status}`)
+      }
+      const data = await resp.json()
+      setAiResult(data)
+    } catch (e: any) {
+      setAiError(e?.message || "Failed to generate roadmap")
+    } finally {
+      setAiBusy(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-3xl font-bold mb-2">Career Roadmaps</h1>
-        <p className="text-muted-foreground">Structured learning paths for different tech roles</p>
+        <p className="text-muted-foreground">
+          Structured learning paths and AI-generated plans based on your resume & target job
+        </p>
       </div>
 
-      {!selectedRoadmap ? (
+      <div className="flex gap-2">
+        <Button variant={mode === "preset" ? "default" : "outline"} onClick={() => setMode("preset")}>
+          Preset Role Roadmaps
+        </Button>
+        <Button variant={mode === "ai" ? "default" : "outline"} onClick={() => setMode("ai")}>
+          AI Skill-Gap Roadmap
+        </Button>
+      </div>
+
+      {mode === "ai" ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>AI Skill-Gap Roadmap</CardTitle>
+            <CardDescription>
+              Upload your resume and paste a job description. Gemini will highlight missing skills and suggest a learning
+              roadmap.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Job Description</label>
+              <Textarea
+                className="min-h-40"
+                placeholder="Paste the target job description here..."
+                value={aiJobDesc}
+                onChange={(e) => setAiJobDesc(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Resume (PDF or text)</label>
+              <Input
+                type="file"
+                accept="application/pdf"
+                onChange={(e) => setAiResumeFile(e.target.files?.[0] || null)}
+              />
+              <Textarea
+                className="min-h-32"
+                placeholder="(Optional) Paste your resume text here if you don't want to upload a file..."
+                value={aiResumeText}
+                onChange={(e) => setAiResumeText(e.target.value)}
+              />
+            </div>
+
+            <Button onClick={handleGenerateAiRoadmap} disabled={aiBusy}>
+              {aiBusy ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Generating roadmap...
+                </>
+              ) : (
+                "Generate Roadmap"
+              )}
+            </Button>
+
+            {aiError && (
+              <Alert variant="destructive">
+                <AlertDescription className="whitespace-pre-line text-sm">{aiError}</AlertDescription>
+              </Alert>
+            )}
+
+            {aiResult && (
+              <div className="space-y-6 mt-4">
+                <div className="p-4 rounded-lg border bg-card">
+                  <h3 className="text-sm font-medium mb-2">Skill Gap (Job vs Resume)</h3>
+                  {aiResult.skill_gaps?.length ? (
+                    <div className="flex flex-wrap gap-2">
+                      {aiResult.skill_gaps.map((gap) => (
+                        <Badge key={gap} variant="secondary">
+                          {gap}
+                        </Badge>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">No clear skill gaps detected.</p>
+                  )}
+                </div>
+
+                <div className="space-y-4">
+                  <h3 className="text-sm font-medium">Suggested Learning Roadmap</h3>
+                  {aiResult.roadmap?.length ? (
+                    aiResult.roadmap.map((phase, idx) => (
+                      <Card key={`${phase.title}-${idx}`}>
+                        <CardHeader>
+                          <CardTitle className="text-lg flex items-center gap-2">
+                            <span className="text-sm font-semibold text-muted-foreground">Phase {idx + 1}</span>
+                            {phase.title}
+                          </CardTitle>
+                          <CardDescription>{phase.duration}</CardDescription>
+                        </CardHeader>
+                        <CardContent className="space-y-3">
+                          <p className="text-sm text-muted-foreground">{phase.description}</p>
+                          {phase.skills && phase.skills.length > 0 && (
+                            <div>
+                              <p className="text-sm font-medium mb-1">Focus skills:</p>
+                              <div className="flex flex-wrap gap-2">
+                                {phase.skills.map((s) => (
+                                  <Badge key={s} variant="secondary">
+                                    {s}
+                                  </Badge>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {phase.resources && phase.resources.length > 0 && (
+                            <div>
+                              <p className="text-sm font-medium mb-1">Suggested resources:</p>
+                              <ul className="list-disc pl-5 text-sm text-muted-foreground space-y-1">
+                                {phase.resources.map((r) => (
+                                  <li key={r}>{r}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </CardContent>
+                      </Card>
+                    ))
+                  ) : (
+                    <p className="text-sm text-muted-foreground">No roadmap generated.</p>
+                  )}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      ) : !selectedRoadmap ? (
         <div className="grid md:grid-cols-2 gap-4">
           {roadmaps.map((roadmap) => (
             <Card

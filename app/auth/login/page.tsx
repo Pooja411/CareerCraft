@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/hooks/use-toast"
 import { useAuth } from "@/components/auth-context"
+import { signIn } from "next-auth/react"
 
 export default function LoginPage() {
   const { login } = useAuth()
@@ -55,6 +56,14 @@ export default function LoginPage() {
             }}
           >
             {busy ? "Signing in…" : "Sign in"}
+          </Button>
+          <div className="flex items-center gap-2">
+            <div className="h-px flex-1 bg-border" />
+            <span className="text-xs text-muted-foreground">or</span>
+            <div className="h-px flex-1 bg-border" />
+          </div>
+          <Button type="button" variant="outline" className="w-full" onClick={() => signIn("google", { callbackUrl: "/" })}>
+            Continue with Google
           </Button>
           <div className="text-sm text-muted-foreground">
             No account?{" "}

@@ -62,7 +62,8 @@
     "zod": "3.25.76",
     "mongoose": "8.19.2",
     "fs": "0.0.1-security",
-    "path": "0.12.7"
+    "path": "0.12.7",
+    "next-auth": "^4.24.7"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.9",

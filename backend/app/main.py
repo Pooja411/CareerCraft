@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 from scrapper import scrape_google_jobs
 
 
-from analyzer import analyze_with_gemini, extract_text_from_pdf_bytes
+from analyzer import analyze_with_gemini, extract_text_from_pdf_bytes, generate_roadmap_with_gemini
 
 load_dotenv()
 
@@ -62,6 +62,52 @@ async def analyze_resume(
     job_desc_final = (jobDesc or "").strip()
 
     result = await analyze_with_gemini(resume_text_final, job_desc_final)
+    return JSONResponse(content=result)
+
+
+@app.post("/roadmap")
+async def generate_roadmap(
+    resumeFile: UploadFile | None = File(default=None),
+    resumeText: str | None = Form(default=None),
+    jobDesc: str | None = Form(default=None),
+):
+    """
+    Accepts a PDF or raw resume text with a job description and returns
+    an AI-generated learning roadmap focused on the skill gap.
+    """
+
+    if not resumeFile and not resumeText:
+        raise HTTPException(status_code=400, detail="Provide resumeFile or resumeText.")
+
+    extracted_text: str = ""
+    if resumeFile is not None:
+        if resumeFile.content_type not in (
+            "application/pdf",
+            "application/octet-stream",
+        ):
+            raise HTTPException(status_code=400, detail="Only PDF files are supported.")
+        file_bytes = await resumeFile.read()
+        if not file_bytes:
+            raise HTTPException(status_code=400, detail="Empty file received.")
+        extracted_text = await extract_text_from_pdf_bytes(file_bytes)
+
+    resume_text_final = (resumeText or "").strip()
+    if extracted_text:
+        resume_text_final = extracted_text
+
+    if not resume_text_final:
+        raise HTTPException(
+            status_code=400, detail="Could not extract resume text. Try another file."
+        )
+
+    job_desc_final = (jobDesc or "").strip()
+
+    if not job_desc_final:
+        raise HTTPException(
+            status_code=400, detail="Job description is required for roadmap generation."
+        )
+
+    result = await generate_roadmap_with_gemini(resume_text_final, job_desc_final)
     return JSONResponse(content=result)
 
 
